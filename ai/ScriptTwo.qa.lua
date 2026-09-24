@@ -11,6 +11,9 @@
 -- v12: per-Apply registry (applyId); «Снять блок» / RMB on code unloads one instance; «Снять» = all.
 -- v13: forward-decl RenderHistory/CollectLuaBlocks before SyncCodeHits (Lua 5.1 upvalue fix);
 --     subtle code-hit tint (no muddy full-block yellow); SCRIPT_SAVE prioritized + workingCache.
+-- v27: AccLuaAI.CancelRequest export (same Lua 5.1 scoping as RenderHistory): HandleSys lives in another
+--      do-block and called global CancelRequest → nil crash on [MODEL]busy,...[/MODEL]. Busy switch still
+--      Stop+queues MODEL after cancel.
 -- v26: history restore fix: a [HISTORY] (or any structured sys reply) whose PAYLOAD contains "[QA_ERROR]"
 --      (a rejected ACTIONS plan saved in the history) was thrown away as an error -> nothing restored after
 --      /reload. Model switch while a reply is being generated: the request is cancelled and the switch
@@ -44,7 +47,7 @@
 -- Model text is display-only. It is never evaluated as Lua or as an action.
 -- No chat-frame output: replies open this window instead.
 
-local UIVER = 26
+local UIVER = 27
 local prev = _G.AccLuaAI
 if type(prev) == "table" and prev.ver == UIVER and prev.frame then
     return
@@ -1755,6 +1758,7 @@ end
 
 -- Request Stop: [AI:CANCEL] goes straight to the host (not through the silent queue, which may be busy).
 -- The entry is marked at once; the [CANCEL] ack (or 15 s) releases the chat wait and the queue.
+-- AccLuaAI.CancelRequest: HandleSys is another do-block (Lua 5.1); local CancelRequest is invisible there.
 local function CancelRequest()
     local kind = AccLuaAI.waitingKind
     if not IsChatKind(kind) then return end
@@ -1765,6 +1769,7 @@ local function CancelRequest()
     status:SetText(T("Отменяю запрос...", "Cancelling the request..."))
     UpdateContext()
 end
+AccLuaAI.CancelRequest = CancelRequest
 
 -- Queued messages are dropped (AI disabled): their entries say "cancelled".
 function DropQueue()
@@ -1781,7 +1786,7 @@ function DropQueue()
 end
 
 sendBtn:SetScript("OnClick", Submit)
-cancelBtn:SetScript("OnClick", CancelRequest)
+cancelBtn:SetScript("OnClick", AccLuaAI.CancelRequest)
 input:SetScript("OnEnterPressed", Submit)
 input:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 -- Not every client build has both handlers on an EditBox: a missing one must not break the file.
@@ -3048,9 +3053,12 @@ function HandleSys(text, raw, kind, cmd)
         elseif state == "missing" then
             Sys("[AI:DOWNLOAD=" .. tostring(id) .. "]")
         elseif state == "busy" and id and AfterChat("[AI:MODEL=" .. id .. "]") then
-            -- v26: do not wait minutes for the running answer: stop it, the switch follows the cancel ack.
+            -- v26/v27: stop the running answer, then switch (AfterChat queues MODEL after cancel).
+            -- Must use AccLuaAI.CancelRequest — local CancelRequest is not visible in this do-block.
             if IsChatKind(AccLuaAI.waitingKind) then
-                CancelRequest()
+                if type(AccLuaAI.CancelRequest) == "function" then
+                    AccLuaAI.CancelRequest()
+                end
                 SysStatus(T("Останавливаю ответ и переключаю модель: ", "Stopping the reply, then switching to: ") .. ModelName(id))
             else
                 SysStatus(T("Переключу модель после ответа: ", "Switching the model after the reply: ") .. ModelName(id))
