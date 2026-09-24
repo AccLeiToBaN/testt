@@ -11,6 +11,10 @@
 -- v12: per-Apply registry (applyId); «Снять блок» / RMB on code unloads one instance; «Снять» = all.
 -- v13: forward-decl RenderHistory/CollectLuaBlocks before SyncCodeHits (Lua 5.1 upvalue fix);
 --     subtle code-hit tint (no muddy full-block yellow); SCRIPT_SAVE prioritized + workingCache.
+-- v26: history restore fix: a [HISTORY] (or any structured sys reply) whose PAYLOAD contains "[QA_ERROR]"
+--      (a rejected ACTIONS plan saved in the history) was thrown away as an error -> nothing restored after
+--      /reload. Model switch while a reply is being generated: the request is cancelled and the switch
+--      follows automatically. Think-on shows a slowness warning.
 -- v25: ```macro fences are Apply blocks too (host answers macro requests with them; run via RunMacroText).
 -- v24: "Исправить с AI" button sits right on the red error entry in the history (the header copy was
 --      easy to miss); a block made of /slash macro lines is applied as RunMacroText via Tesq1 instead
@@ -40,7 +44,7 @@
 -- Model text is display-only. It is never evaluated as Lua or as an action.
 -- No chat-frame output: replies open this window instead.
 
-local UIVER = 25
+local UIVER = 26
 local prev = _G.AccLuaAI
 if type(prev) == "table" and prev.ver == UIVER and prev.frame then
     return
@@ -2911,10 +2915,15 @@ function HandleSys(text, raw, kind, cmd)
     end
     local think = text:match("%[THINK%](%d)%[/THINK%]")
     if think then
+        local was = AccLuaAI.think
         AccLuaAI.think = think == "1"
         thinkBtn.text:SetText(ThinkLabel(AccLuaAI.think))
         FitBtn(thinkBtn, 56)
         LayoutHeader()
+        if AccLuaAI.think and was ~= nil and not was then
+            SysStatus("|cffffd200" .. T("Думать: вкл - код точнее, но ответ 1-3 минуты на слабой модели. Выкл = 10-30 с.",
+                "Think: on - better code, but 1-3 minutes per answer on a small model. Off = 10-30 s.") .. "|r")
+        end
         return
     end
     local scriptMsg = text:match("%[SCRIPT%](.-)%[/SCRIPT%]")
@@ -3039,7 +3048,13 @@ function HandleSys(text, raw, kind, cmd)
         elseif state == "missing" then
             Sys("[AI:DOWNLOAD=" .. tostring(id) .. "]")
         elseif state == "busy" and id and AfterChat("[AI:MODEL=" .. id .. "]") then
-            SysStatus(T("Переключу модель после ответа: ", "Switching the model after the reply: ") .. ModelName(id))
+            -- v26: do not wait minutes for the running answer: stop it, the switch follows the cancel ack.
+            if IsChatKind(AccLuaAI.waitingKind) then
+                CancelRequest()
+                SysStatus(T("Останавливаю ответ и переключаю модель: ", "Stopping the reply, then switching to: ") .. ModelName(id))
+            else
+                SysStatus(T("Переключу модель после ответа: ", "Switching the model after the reply: ") .. ModelName(id))
+            end
         else
             SysStatus(T("Не удалось переключить модель", "Could not switch the model"))
         end
@@ -3524,7 +3539,8 @@ function _G.AccLuaAI_Receive(text)
     local kind = AccLuaAI.waitingKind
     local sysCmd = SysAwaited(now) and AccLuaAI.waitingSys or nil
     local sysReply = IsSysReply(visibleText)
-    local qaError = visibleText:find("%[QA_ERROR%]") ~= nil
+    -- v26: only a reply that IS an error counts; a structured sys payload may merely contain the tag.
+    local qaError = (not sysReply) and visibleText:find("%[QA_ERROR%]") ~= nil
     if qaError then AccLuaAI.errAt = now end
     local function ReleaseSys() AccLuaAI.waitingSys, AccLuaAI.waitingSysUntil = nil, nil end
     -- An older DLL keeps one request at a time: its "busy" answers the silent command sent next to the chat
