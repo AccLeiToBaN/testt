@@ -1,10 +1,10 @@
 {
-  "version": 1790285196,
+  "version": 1790285815,
   "files": [
     {
       "name": "AccLuaAIHost.qa.exe",
       "url": "https://raw.githubusercontent.com/AccLeiToBaN/testt/main/ai/AccLuaAIHost.qa.exe",
-      "sha256": "08988875501fa6c85397226856a13f758ca12e812f16939bf42b3618d24341e1",
+      "sha256": "cecf39dd6fa74aa6007b41ef2a11bea14e69f5f6f91a3dc04b2d766e50b5fe73",
       "size": 1384448
     },
     {
