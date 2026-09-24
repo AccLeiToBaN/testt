@@ -1,5 +1,5 @@
 {
-  "version": 1790285815,
+  "version": 1790286299,
   "files": [
     {
       "name": "AccLuaAIHost.qa.exe",
@@ -10,8 +10,8 @@
     {
       "name": "ScriptTwo.qa.lua",
       "url": "https://raw.githubusercontent.com/AccLeiToBaN/testt/main/ai/ScriptTwo.qa.lua",
-      "sha256": "05776009d4693057d2b8e223d9c7cd41a83f452bd205585bdb07b15a6ceb635e",
-      "size": 175454
+      "sha256": "5b007da03cb20f0802e0be424dfe51f863e7b05c0b856ba34725a4c25419ee19",
+      "size": 176061
     }
   ]
 }
