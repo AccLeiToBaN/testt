@@ -1,0 +1,6 @@
+AccLuaCJK2.ttf (26.09.2026) = merged TrueType font for AccLua TRANSLATE chat (Latin + Cyrillic + CJK + Hangul).
+Sources:
+- Noto Sans (Latin, Cyrillic) - SIL Open Font License 1.1, see OFL-NotoSans.txt
+- Droid Sans Fallback (Han, kana, CJK punctuation) - Apache License 2.0, https://www.apache.org/licenses/LICENSE-2.0 (AOSP platform_frameworks_base data/fonts/DroidSansFallbackFull.ttf)
+- NanumGothic (Hangul) - SIL Open Font License 1.1, see OFL-NanumGothic.txt
+Family renamed to AccLuaCJK2. sha256 b089a78ccbde76985435d8d765ccc31f1d052a0e4d4acaacb3eac5102b6ae640, 5482796 bytes.
