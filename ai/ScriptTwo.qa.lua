@@ -2590,6 +2590,23 @@ local function MiB2GB(mib) return string.format("%.0f %s", (tonumber(mib) or 0) 
 
 -- What each model is good for (ids come from the host; unknown ids get a generic line).
 MODEL_INFO = {
+    -- ai-light (26.09): light models only
+    ["qwen35-4b"] = {
+        star = true,
+        short = T("рекомендуем: лёгкая (2.7 ГБ), быстрая, русский и код", "recommended: light (2.7 GB), fast, Russian + code"),
+        long = T("Qwen3.5-4B (Alibaba, 2026). Вдвое легче и примерно вдвое быстрее 9B: работа с инструментами и поиском на том же уровне, код и знания немного слабее. 201 язык. Хватает 4 ГБ видеопамяти.",
+            "Qwen3.5-4B (Alibaba, 2026). Half the size and about twice as fast as the 9B: tool use and search on par, code and knowledge a bit weaker. 201 languages. 4 GB of VRAM is enough."),
+    },
+    ["qwen35-2b"] = {
+        short = T("самая лёгкая (1.3 ГБ), слабее в коде и русском", "lightest (1.3 GB), weaker code + Russian"),
+        long = T("Qwen3.5-2B (Alibaba, 2026). Для слабых ПК: 1.3 ГБ, работает и на процессоре. Код и русский заметно слабее 4B, иногда зацикливается в режиме размышления.",
+            "Qwen3.5-2B (Alibaba, 2026). For weak PCs: 1.3 GB, runs on the CPU too. Code and Russian clearly weaker than the 4B; sometimes loops in thinking mode."),
+    },
+    ["lfm25-2b6"] = {
+        short = T("очень быстрая (1.7 ГБ), хороша для поиска, код слабый", "very fast (1.7 GB), good for search, weak code"),
+        long = T("LFM2.5-2.6B (Liquid AI, 2026). Самая быстрая, лучшая в своём размере по работе с инструментами и поиску, есть русский. Для кода производитель её не рекомендует - для макросов берите Qwen3.5-4B.",
+            "LFM2.5-2.6B (Liquid AI, 2026). The fastest, best in its size at tool use and search, speaks Russian. The vendor does not recommend it for code - use Qwen3.5-4B for macros."),
+    },
     ["qwen35-9b"] = {
         star = true,
         short = T("рекомендуем: лучший код и русский, думает перед ответом", "recommended: best code + Russian, thinks before answering"),
