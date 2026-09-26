@@ -1053,6 +1053,14 @@ frame:SetScript("OnSizeChanged", Resized)
 frame:SetScript("OnShow", function()
     Resized()
     LayoutHeader()
+    -- Start AccLuaAIHost + KoboldCpp only while this window is open.
+    AccLuaAI.engineWanted = true
+    if not AccLuaAI._bootDone then
+        AccLuaAI._bootDone = true
+        bootAt = GetTime() + 0.3
+    else
+        Sys("[AI:WAKE]")
+    end
 end)
 
 local grip = CreateFrame("Button", nil, frame)
@@ -1595,10 +1603,10 @@ end
 
 -- Silent host commands (model list / switch / download / delete / think / reset): one at a time, sent by the
 -- ticker even while a chat reply is awaited. Queued chat messages go out only after them.
--- bootAt: startup commands not queued yet (chat waits too).
+-- bootAt: set on first AI window Show only — never at ScriptTwo load (Neural on ≠ AI in use).
 sysQueue = {}
 function Sys(cmd) table.insert(sysQueue, cmd) end
-bootAt = GetTime() + 2
+bootAt = nil
 
 -- A chat request waits for startup, a pending chat reply and the silent commands queued or in flight
 -- (they are answered at once; the startup [AI:CANCEL] must reach the host before any new question).
@@ -2539,6 +2547,11 @@ end)
 local _prevOnHide = frame:GetScript("OnHide")
 frame:SetScript("OnHide", function(self)
     fileMenu:Hide()
+    -- Free KoboldCpp RAM when leaving the AI section; host stays until WoW exit.
+    if AccLuaAI.engineWanted then
+        AccLuaAI.engineWanted = false
+        Sys("[AI:SLEEP]")
+    end
     if _prevOnHide then _prevOnHide(self) end
 end)
 
@@ -3476,12 +3489,12 @@ ticker:SetScript("OnUpdate", function(_, elapsed)
     end
     if bootAt and now > bootAt then
         bootAt = nil
-        -- Startup, in this order and ahead of anything clicked meanwhile: drop a request left running by
-        -- the UI before /reload, then the model list, then both dialogues.
+        -- First open of the AI window: cancel stale work, wake KoboldCpp, then UI state.
         table.insert(sysQueue, 1, "[AI:CANCEL]")
-        table.insert(sysQueue, 2, "[AI:MODELS]")
-        table.insert(sysQueue, 3, "[AI:HISTORY]")
-        table.insert(sysQueue, 4, "[AI:THINK]")
+        table.insert(sysQueue, 2, "[AI:WAKE]")
+        table.insert(sysQueue, 3, "[AI:MODELS]")
+        table.insert(sysQueue, 4, "[AI:HISTORY]")
+        table.insert(sysQueue, 5, "[AI:THINK]")
     end
     -- Timeouts first: an expired talk/actions request must get its "timeout" line before anything is sent.
     local kind = AccLuaAI.waitingKind
@@ -3522,7 +3535,7 @@ ticker:SetScript("OnUpdate", function(_, elapsed)
     end
 end)
 
-local SYS_TAGS = { "MODELS", "MODEL", "DL", "RESET", "HISTORY", "DELETE", "CANCEL", "THINK", "SYSERR", "SCRIPT" }
+local SYS_TAGS = { "MODELS", "MODEL", "DL", "RESET", "HISTORY", "DELETE", "CANCEL", "THINK", "SYSERR", "SCRIPT", "WAKE", "SLEEP" }
 local function IsSysReply(text)
     for _, tag in ipairs(SYS_TAGS) do
         if text:find("^%[" .. tag .. "%]") then return true end
@@ -3539,6 +3552,7 @@ function _G.AccLuaAI_Receive(text)
             or visibleText:find("^%[AI:DELETE=") or visibleText:find("^%[AI:DLSTATUS")
             or visibleText:find("^%[AI:HISTORY") or visibleText:find("^%[AI:CANCEL")
             or visibleText:find("^%[AI:MODEL=") or visibleText:find("^%[AI:DOWNLOAD=")
+            or visibleText:find("^%[AI:WAKE") or visibleText:find("^%[AI:SLEEP")
             or visibleText:find("^%[AI:SCRIPT_") then
         if SysAwaited(GetTime()) then AccLuaAI.waitingSys, AccLuaAI.waitingSysUntil = nil, nil end
         return
