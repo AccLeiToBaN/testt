@@ -11,6 +11,8 @@
 -- v12: per-Apply registry (applyId); «Снять блок» / RMB on code unloads one instance; «Снять» = all.
 -- v13: forward-decl RenderHistory/CollectLuaBlocks before SyncCodeHits (Lua 5.1 upvalue fix);
 --     subtle code-hit tint (no muddy full-block yellow); SCRIPT_SAVE prioritized + workingCache.
+-- v28: «Сеть» header toggle ([AI:WEB=0|1|2], reply [WEB]n[/WEB]); mic button left of the recall arrow
+--      (voice_mic.lua AccLuaVoiceToggleFor: text into this input, voice auto mode = Send); LFM2.5 gone.
 -- v27: AccLuaAI.CancelRequest export (same Lua 5.1 scoping as RenderHistory): HandleSys lives in another
 --      do-block and called global CancelRequest → nil crash on [MODEL]busy,...[/MODEL]. Busy switch still
 --      Stop+queues MODEL after cancel.
@@ -47,7 +49,7 @@
 -- Model text is display-only. It is never evaluated as Lua or as an action.
 -- No chat-frame output: replies open this window instead.
 
-local UIVER = 27
+local UIVER = 28
 local prev = _G.AccLuaAI
 if type(prev) == "table" and prev.ver == UIVER and prev.frame then
     return
@@ -211,7 +213,8 @@ local function SendTracked(kind, text)
     -- The wait is set before the send, so an error the DLL delivers at once still finds it.
     if kind == "sys" then
         if SysAwaited(now) or (AccLuaAI.sysSerial and ChatAwaited(now)) then return false end
-        AccLuaAI.waitingSys, AccLuaAI.waitingSysUntil = Trim(text), now + 20
+        -- v28: [AI:WEB...] waits 5 s only: an older host that never answers must not hold the queue for 20 s.
+        AccLuaAI.waitingSys, AccLuaAI.waitingSysUntil = Trim(text), now + (tostring(text):find("^%[AI:WEB") and 5 or 20)
         if SendToHost(text) then return true end
         AccLuaAI.waitingSys, AccLuaAI.waitingSysUntil = nil, nil
         return false
@@ -285,7 +288,7 @@ frame:SetFrameStrata("FULLSCREEN_DIALOG")
 frame:SetFrameLevel(50)
 frame:SetMovable(true)
 frame:SetResizable(true)
-if frame.SetMinResize then frame:SetMinResize(560, 280) end
+if frame.SetMinResize then frame:SetMinResize(640, 280) end -- v28: header row 1 has «Сеть» too
 if frame.SetMaxResize then frame:SetMaxResize(1200, 900) end
 frame:EnableMouse(true)
 -- Drag lives on titleBtn + dragStrip: UIVER8 packed ~698px of header buttons into 640px,
@@ -367,6 +370,10 @@ end
 local modelBtn = Button(frame, 80, T("Модель", "Model"))
 -- Thinking for code requests (slower, more accurate); toggled on the host with [AI:THINK=0|1].
 local thinkBtn = Button(frame, 64, ThinkLabel(true))
+-- v28: web search mode on the host ([AI:WEB=n]: 0 = only "?" questions, 1 = auto (default), 2 = always).
+-- Kept in AccLuaAI (the main chunk is near Lua 5.1's 200-locals limit).
+AccLuaAI.web = 1
+AccLuaAI.webBtn = Button(frame, 64, T("Сеть:авто", "Web:auto"))
 local runBtn = Button(frame, 40, "Run")
 -- "Stop act" stops a running local ACTION; the request Stop next to Send cancels a waiting reply.
 local stopBtn = Button(frame, 56, "Stop act")
@@ -382,7 +389,7 @@ local unloadBtn = Button(frame, 48, T("Снять", "Unload"))
 local unloadBlockBtn = Button(frame, 72, T("Снять блок", "Unload blk"))
 local applyBtn = Button(frame, 64, T("Применить", "Apply"))
 local reloadBtn = Button(frame, 52, "Reload")
-for _, b in ipairs({ modeBtn, actBtn, chatBtn, modelBtn, thinkBtn, runBtn, stopBtn, sayBtn,
+for _, b in ipairs({ modeBtn, actBtn, chatBtn, modelBtn, thinkBtn, AccLuaAI.webBtn, runBtn, stopBtn, sayBtn,
         closeBtn, clearBtn, copyBtn, fileBtn, unloadBtn, unloadBlockBtn, applyBtn, reloadBtn }) do
     RaiseHeaderBtn(b)
 end
@@ -394,6 +401,7 @@ local function LayoutHeader()
     FitBtn(chatBtn, 44)
     FitBtn(modelBtn, 64)
     FitBtn(thinkBtn, 56)
+    FitBtn(AccLuaAI.webBtn, 56)
     FitBtn(runBtn, 36)
     FitBtn(stopBtn, 48)
     FitBtn(sayBtn, 36)
@@ -418,7 +426,9 @@ local function LayoutHeader()
     modelBtn:SetPoint("LEFT", chatBtn, "RIGHT", HDR_GAP + 4, 0)
     thinkBtn:ClearAllPoints()
     thinkBtn:SetPoint("LEFT", modelBtn, "RIGHT", HDR_GAP, 0)
-    local leftAnchor = thinkBtn
+    AccLuaAI.webBtn:ClearAllPoints()
+    AccLuaAI.webBtn:SetPoint("LEFT", thinkBtn, "RIGHT", HDR_GAP, 0)
+    local leftAnchor = AccLuaAI.webBtn
     for _, b in ipairs({ runBtn, stopBtn, sayBtn }) do
         b:ClearAllPoints()
         if b:IsShown() then
@@ -525,8 +535,8 @@ end
 -- sent = questions for Up/Down recall (oldest first, 30 max), recall = position while browsing them.
 local function NewChat(intro) return { history = { intro }, plain = { "" }, top = 1, sent = {} } end
 AccLuaAI.chats = {
-    talk = NewChat("|cff66ccffAccLua AI|r " .. T("(локально, без облака). Первый ответ после запуска может идти 10-40 с. Вопрос с ? или словами найди/поищи - поиск в интернете. Кнопка с именем модели - выбор модели: там же видно, потянет ли её ваш ПК.",
-        "(local, no cloud). First answer after a start may take 10-40 s. Start with ? or say найди/поищи for a web search. The model button switches models and shows whether your PC can run each one.")),
+    talk = NewChat("|cff66ccffAccLua AI|r " .. T("(локально, без облака). Первый ответ после запуска может идти 10-40 с. Вопрос с ? или словами найди/поищи - поиск в интернете; кнопка «Сеть» - когда искать (авто / всегда / только с ?). Кнопка с именем модели - выбор модели: там же видно, потянет ли её ваш ПК.",
+        "(local, no cloud). First answer after a start may take 10-40 s. Start with ? or say найди/поищи for a web search; the Web button sets when to search (auto / always / only with ?). The model button switches models and shows whether your PC can run each one.")),
     actions = NewChat("|cff66ccffACTIONS:|r " .. T("опишите действие (прыгни, сядь, открой сумку, иди к NPC ...)",
         "describe an action (jump, sit, open bags, go to NPC ...)")),
     chat = NewChat("|cff66ccffCHAT:|r " .. T("ИИ сам отвечает в игровой чат (ЛС / Сказать). Включите «Отвечать в ЛС» или «Отвечать в /say» и добавьте ники в белый список. «Черновик» - если хотите отправлять Enter вручную. Поле ввода - вопрос к ИИ, в игру не уходит.",
@@ -558,7 +568,8 @@ end
 -- Soft green for code, gold + ▶ for the Apply-selected fence. Returns display text + hit metas.
 -- Forward locals BEFORE SyncCodeHits: Lua 5.1 resolves names at compile time; declaring after
 -- SyncCodeHits made OnClick call global RenderHistory/CollectLuaBlocks (nil → click error, total=0).
-local RenderHistory, CollectLuaBlocks, PreviewBlock, OpenCopy
+-- v28: sysQueue/Sys/bootAt too: frame OnShow (below) used them as globals -> boot queries never ran, re-open = nil call.
+local RenderHistory, CollectLuaBlocks, PreviewBlock, OpenCopy, sysQueue, Sys, bootAt
 -- base: blocks counted in earlier history entries (block numbers run across the whole chat).
 local InsertEntry, AddHistory, Answer
 do -- v17: scope block (Lua 5.1 200-local limit)
@@ -1081,7 +1092,7 @@ input:SetHeight(24)
 input:SetFontObject("GameFontHighlight")
 Font(input, 13)
 input:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 16, 9)
-input:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -106, 9)
+input:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -132, 9) -- v28: room for the mic button
 -- v20: grey placeholder inside the empty input (mode-dependent text set by UpdateMode).
 local inputHint = input:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 inputHint:SetPoint("LEFT", input, "LEFT", 2, 0)
@@ -1127,10 +1138,51 @@ recallBtn.icon:SetTexCoord(0.22, 0.78, 0.25, 0.75)
 recallBtn.icon:SetWidth(16)
 recallBtn.icon:SetHeight(16)
 recallBtn.icon:SetPoint("CENTER")
+-- v28: voice input into this box (voice_mic.lua API), left of the recall arrow. Looks: idle / rec (red,
+-- pulsing) / trans ("...") / start (blue) / other (dim: the mic records for the chat).
+do
+    local mic = Button(frame, 22, "")
+    AccLuaAI.micBtn = mic
+    mic:SetHeight(22)
+    mic:SetPoint("RIGHT", recallBtn, "LEFT", -4, 0)
+    mic:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    mic.tint = mic:CreateTexture(nil, "BORDER")
+    mic.tint:SetAllPoints(mic)
+    mic.tint:Hide()
+    mic.icon = mic:CreateTexture(nil, "ARTWORK")
+    mic.icon:SetWidth(16)
+    mic.icon:SetHeight(16)
+    mic.icon:SetPoint("CENTER")
+    if not mic.icon:SetTexture("Interface\\Common\\VoiceChat-Speaker") then
+        mic.icon:Hide()
+        mic.label = T("Гол", "Mic") -- no texture on this client: a text label instead
+        Font(mic.text, 10)
+    end
+    mic.text:SetText(mic.label or "")
+    local TINT = { rec = { 0.80, 0.10, 0.10, 0.85 }, trans = { 0.75, 0.62, 0.10, 0.55 }, start = { 0.10, 0.35, 0.55, 0.80 } }
+    mic:SetScript("OnUpdate", function(self, elapsed)
+        self.acc = (self.acc or 0) + (elapsed or 0)
+        if self.acc < 0.2 then return end
+        self.acc = 0
+        local look = "idle"
+        if type(_G.AccLuaVoiceStateFor) == "function" then
+            local ok, mode, mine = pcall(_G.AccLuaVoiceStateFor, input)
+            if ok and mine and TINT[mode] then look = mode
+            elseif ok and (mode == "rec" or mode == "trans") then look = "other" end
+        end
+        if look ~= self.look then
+            self.look = look
+            if TINT[look] then self.tint:SetTexture(unpack(TINT[look])) self.tint:Show() else self.tint:Hide() end
+            self.icon:SetAlpha((look == "trans" or look == "other") and 0.3 or 1)
+            self.text:SetText((look == "trans" or look == "start") and "..." or (self.label or ""))
+        end
+        if look == "rec" then self.icon:SetAlpha(math.floor(GetTime() * 2) % 2 == 0 and 1 or 0.35) end
+    end)
+end
 -- Request Stop: visible only while a TALK/ACTIONS reply is awaited (the input shrinks to make room).
 local cancelBtn = Button(frame, 48, T("Стоп", "Stop"))
 cancelBtn:SetHeight(22)
-cancelBtn:SetPoint("RIGHT", recallBtn, "LEFT", -4, 0)
+cancelBtn:SetPoint("RIGHT", AccLuaAI.micBtn, "LEFT", -4, 0)
 cancelBtn:Hide()
 
 local function SetRun(on) if on then runBtn:Show() else runBtn:Hide() end LayoutHeader() end
@@ -1568,12 +1620,12 @@ local function UpdateContext()
     if busy ~= cancelShown then
         cancelShown = busy
         if busy then cancelBtn:Show() else cancelBtn:Hide() end
-        input:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", busy and -158 or -106, 9)
+        input:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", busy and -184 or -132, 9)
     end
 end
 
 -- One model reply as shown in the chat (live replies and restored history use the same rules).
-local FormatReply, sysQueue, Sys, bootAt, ChatBlocked, AfterChat, GameHead, SendRequest, PumpQueue, QueueText, SubmitText, DropQueue
+local FormatReply, ChatBlocked, AfterChat, GameHead, SendRequest, PumpQueue, QueueText, SubmitText, DropQueue
 do -- v17: scope block (Lua 5.1 200-local limit)
 -- v18: [WORKING_LUA]..[/WORKING_LUA] is the host's file payload (already saved to working.lua).
 -- Shown once: dropped when a ```fence follows, else turned into a ```lua fence.
@@ -1816,6 +1868,74 @@ recallBtn:SetScript("OnEnter", function(self)
     GameTooltip:Show()
 end)
 recallBtn:SetScript("OnLeave", function(self)
+    self.bg:SetTexture(unpack(ACCENT))
+    if type(GameTooltip) == "table" then GameTooltip:Hide() end
+end)
+-- v28: voice. The box carries its options: voice_mic.lua puts every take for it (mic button or the record
+-- key held in this box) only into this box, never into the game chat; with the voice auto mode on, send()
+-- runs the same Submit as the Send button. status() mirrors the mic's messages into the status line.
+input.AccLuaVoiceOpts = {
+    send = function()
+        Submit()
+        return (input:GetText() or "") == ""
+    end,
+    status = function(text) SysStatus(T("Голос: ", "Voice: ") .. tostring(text or "")) end,
+}
+AccLuaAI.micBtn:SetScript("OnClick", function(_, button)
+    if button == "RightButton" then
+        -- RMB: cancel our take; otherwise the voice settings (language, model, keys).
+        if type(_G.AccLuaVoiceCancelFor) == "function" and _G.AccLuaVoiceCancelFor(input) then return end
+        local vm = _G.ACCLUA_VOICE_MIC
+        if type(vm) == "table" and type(vm.OpenMenu) == "function" then pcall(vm.OpenMenu) end
+        return
+    end
+    local r = "not_installed"
+    if type(_G.AccLuaVoiceToggleFor) == "function" and type(_G.AccLuaVoiceStart) == "function" then
+        local ok, res = pcall(_G.AccLuaVoiceToggleFor, input, input.AccLuaVoiceOpts)
+        r = ok and res or "error"
+    elseif type(_G.AccLuaMenuAction) == "function" then
+        pcall(_G.AccLuaMenuAction, 160) -- voice module not loaded here: the DLL's voice installer / check
+    else
+        r = "unavailable"
+    end
+    if r == "not_installed" then
+        SysStatus("|cffffd200" .. T("Голосовой ввод не установлен - открыл установку. Потом снова нажмите микрофон.",
+            "Voice input is not installed - the installer is open. Then click the mic again.") .. "|r")
+    elseif r == "unavailable" then
+        SysStatus("|cffff7777" .. T("Голосовой ввод недоступен: модуль микрофона не загружен", "Voice input unavailable: the mic module is not loaded") .. "|r")
+    elseif r == "busy" then
+        SysStatus(T("Голос: микрофон занят (запись или распознавание для чата / другого поля) - дождитесь окончания",
+            "Voice: the mic is busy (recording or transcribing for the chat / another field) - wait for it to finish"))
+    elseif r == "wait" then
+        SysStatus(T("Голос: ещё распознаю... (ПКМ - отменить)", "Voice: still recognizing... (right-click drops it)"))
+    elseif r == "error" then
+        SysStatus("|cffff7777" .. T("Голос: ошибка модуля микрофона", "Voice: mic module error") .. "|r")
+    end
+end)
+AccLuaAI.micBtn:SetScript("OnEnter", function(self)
+    self.bg:SetTexture(unpack(HOVER))
+    if type(GameTooltip) ~= "table" then return end
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine(T("Голосовой ввод", "Voice input"), 0.4, 0.8, 1)
+    local have = type(_G.AccLuaVoiceStateFor) == "function" and type(_G.AccLuaVoiceStart) == "function"
+    local ok, _, _, auto, key, st = false
+    if have then ok, _, _, auto, key, st = pcall(_G.AccLuaVoiceStateFor, input, true) end
+    if not have or (ok and st == "not_installed") then
+        GameTooltip:AddLine(T("Не установлен: клик откроет установку.", "Not installed: a click opens the installer."), 1, 0.82, 0, true)
+    end
+    GameTooltip:AddLine(T("Клик: начать запись, ещё клик - остановить и распознать. Текст встанет в это поле.",
+        "Click: start recording, click again - stop and recognize. The text goes into this input."), 1, 1, 1, true)
+    GameTooltip:AddLine(ok and auto and T("Авто-режим голоса вкл: распознанный вопрос сразу уходит ИИ (как Send).",
+            "Voice auto mode on: the recognized question goes to the AI at once (like Send).")
+        or T("Авто-режим голоса выкл: текст только вставляется, отправка - Enter / Send.",
+            "Voice auto mode off: the text is only inserted, send with Enter / Send."), 0.8, 0.9, 0.8, true)
+    GameTooltip:AddLine(T("ПКМ: во время записи - отмена, иначе - настройки голоса (язык, модель, клавиши).",
+        "Right-click: cancel while recording, otherwise voice settings (language, model, keys)."), 0.8, 0.85, 0.9, true)
+    GameTooltip:AddLine(T("Клавиша записи (удерживать) тоже работает, пока курсор в этом поле",
+        "The record key (hold) also works while this input has the cursor") .. (ok and key and (" (" .. tostring(key) .. ")") or "") .. ".", 0.6, 0.8, 1, true)
+    GameTooltip:Show()
+end)
+AccLuaAI.micBtn:SetScript("OnLeave", function(self)
     self.bg:SetTexture(unpack(ACCENT))
     if type(GameTooltip) == "table" then GameTooltip:Hide() end
 end)
@@ -2602,11 +2722,6 @@ MODEL_INFO = {
         long = T("Qwen3.5-2B (Alibaba, 2026). Для слабых ПК: 1.3 ГБ, работает и на процессоре. Код и русский заметно слабее 4B, иногда зацикливается в режиме размышления.",
             "Qwen3.5-2B (Alibaba, 2026). For weak PCs: 1.3 GB, runs on the CPU too. Code and Russian clearly weaker than the 4B; sometimes loops in thinking mode."),
     },
-    ["lfm25-2b6"] = {
-        short = T("очень быстрая (1.7 ГБ), хороша для поиска, код слабый", "very fast (1.7 GB), good for search, weak code"),
-        long = T("LFM2.5-2.6B (Liquid AI, 2026). Самая быстрая, лучшая в своём размере по работе с инструментами и поиску, есть русский. Для кода производитель её не рекомендует - для макросов берите Qwen3.5-4B.",
-            "LFM2.5-2.6B (Liquid AI, 2026). The fastest, best in its size at tool use and search, speaks Russian. The vendor does not recommend it for code - use Qwen3.5-4B for macros."),
-    },
     ["qwen35-9b"] = {
         star = true,
         short = T("рекомендуем: лучший код и русский, думает перед ответом", "recommended: best code + Russian, thinks before answering"),
@@ -2814,6 +2929,23 @@ end)
 thinkBtn:SetScript("OnClick", function()
     Sys("[AI:THINK=" .. (AccLuaAI.think == false and "1" or "0") .. "]")
 end)
+-- v28: «Сеть» label = local value at once (an older host that never answers keeps it); [WEB]n[/WEB] corrects it.
+function AccLuaAI.SetWeb(n)
+    n = tonumber(n)
+    if n ~= 0 and n ~= 2 then n = 1 end
+    AccLuaAI.web = n
+    AccLuaAI.webBtn.text:SetText(n == 0 and T("Сеть:выкл", "Web:off") or n == 2 and T("Сеть:вкл", "Web:on") or T("Сеть:авто", "Web:auto"))
+    LayoutHeader()
+end
+-- авто -> вкл -> выкл -> авто; a still queued older [AI:WEB=n] is replaced (one command per click burst).
+AccLuaAI.webBtn:SetScript("OnClick", function()
+    local n = AccLuaAI.web == 1 and 2 or AccLuaAI.web == 2 and 0 or 1
+    AccLuaAI.SetWeb(n)
+    for i = #sysQueue, 1, -1 do
+        if tostring(sysQueue[i]):find("^%[AI:WEB=") then table.remove(sysQueue, i) end
+    end
+    Sys("[AI:WEB=" .. n .. "]")
+end)
 
 -- Header / constructor tooltips (Russian).
 Tip(modeBtn, "TALK", T("Вопросы, код, макросы, поиск в интернете (? в начале).", "Questions, code, macros, web search (leading ?)."))
@@ -2826,6 +2958,9 @@ Tip(modelBtn, T("Модель", "Model"),
 Tip(thinkBtn, T("Размышление перед кодом", "Thinking before code"),
     T("Вкл: код и макросы точнее, но ответ 20–90 с. Выкл: ответ 5–15 с. Стоп рядом с Send прерывает долгий ответ.",
         "On: more accurate code/macros, 20–90 s. Off: 5–15 s. Stop next to Send cancels a long reply."))
+Tip(AccLuaAI.webBtn, T("Поиск в интернете", "Web search"),
+    T("Авто: ищет в интернете, когда вопрос похож на поиск или начинается с «?». Вкл: ищет всегда (кроме кода). Выкл: только вопросы с «?». Клик - следующий режим.",
+        "Auto: searches the web when the question looks like a search or starts with \"?\". On: always searches (except code). Off: only questions starting with \"?\". Click = next mode."))
 Tip(runBtn, T("Запуск плана", "Run plan"),
     T("Подтвердить и выполнить план ACTIONS, который меняет диалог/квест.",
         "Confirm and run an ACTIONS plan that changes gossip/quest state."))
@@ -2933,6 +3068,7 @@ function HandleSys(text, raw, kind, cmd)
     local sysErr = text:match("%[SYSERR%](.-)%[/SYSERR%]")
     if sysErr then
         if cmd == "[AI:SCRIPT_GET]" then AccLuaAI.runFileNext = nil end
+        if cmd == "[AI:WEB]" then return end -- v28: an older host without WEB: keep the local label quietly
         -- Apply during an AI reply: an older DLL refuses silent commands -> save working.lua after it.
         if cmd and cmd:find("^%[AI:SCRIPT_SAVE=") and AfterChat(cmd) then
             SysStatus(T("working.lua сохранится после ответа", "working.lua is saved after the reply"))
@@ -2959,6 +3095,11 @@ function HandleSys(text, raw, kind, cmd)
             SysStatus("|cffffd200" .. T("Думать: вкл - код точнее, но ответ 1-3 минуты на слабой модели. Выкл = 10-30 с.",
                 "Think: on - better code, but 1-3 minutes per answer on a small model. Off = 10-30 s.") .. "|r")
         end
+        return
+    end
+    local web = text:match("^%[WEB%](%d)%[/WEB%]") -- anchored: a [HISTORY] payload may quote the tag
+    if web then
+        AccLuaAI.SetWeb(web)
         return
     end
     local scriptMsg = text:match("%[SCRIPT%](.-)%[/SCRIPT%]")
@@ -3512,6 +3653,7 @@ ticker:SetScript("OnUpdate", function(_, elapsed)
         table.insert(sysQueue, 3, "[AI:MODELS]")
         table.insert(sysQueue, 4, "[AI:HISTORY]")
         table.insert(sysQueue, 5, "[AI:THINK]")
+        table.insert(sysQueue, 6, "[AI:WEB]")
     end
     -- Timeouts first: an expired talk/actions request must get its "timeout" line before anything is sent.
     local kind = AccLuaAI.waitingKind
@@ -3552,7 +3694,7 @@ ticker:SetScript("OnUpdate", function(_, elapsed)
     end
 end)
 
-local SYS_TAGS = { "MODELS", "MODEL", "DL", "RESET", "HISTORY", "DELETE", "CANCEL", "THINK", "SYSERR", "SCRIPT", "WAKE", "SLEEP" }
+local SYS_TAGS = { "MODELS", "MODEL", "DL", "RESET", "HISTORY", "DELETE", "CANCEL", "THINK", "WEB", "SYSERR", "SCRIPT", "WAKE", "SLEEP" }
 local function IsSysReply(text)
     for _, tag in ipairs(SYS_TAGS) do
         if text:find("^%[" .. tag .. "%]") then return true end
@@ -3565,7 +3707,7 @@ function _G.AccLuaAI_Receive(text)
     local visibleText = Decode(raw)
     -- Misrouted outbound IPC (e.g. SCRIPT_SAVE hex) must never become a chat You/AI line.
     if visibleText:find("^%[AI:SCRIPT") or visibleText:find("^%[AI:MODELS")
-            or visibleText:find("^%[AI:THINK") or visibleText:find("^%[AI:RESET")
+            or visibleText:find("^%[AI:THINK") or visibleText:find("^%[AI:WEB") or visibleText:find("^%[AI:RESET")
             or visibleText:find("^%[AI:DELETE=") or visibleText:find("^%[AI:DLSTATUS")
             or visibleText:find("^%[AI:HISTORY") or visibleText:find("^%[AI:CANCEL")
             or visibleText:find("^%[AI:MODEL=") or visibleText:find("^%[AI:DOWNLOAD=")
