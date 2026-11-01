@@ -49,7 +49,7 @@
 -- Model text is display-only. It is never evaluated as Lua or as an action.
 -- No chat-frame output: replies open this window instead.
 
-local UIVER = 28
+local UIVER = 29
 local prev = _G.AccLuaAI
 if type(prev) == "table" and prev.ver == UIVER and prev.frame then
     return
@@ -99,7 +99,9 @@ local function Font(obj, size)
         local p = GameFontHighlight:GetFont()
         if type(p) == "string" and p ~= "" then path = p end
     end
-    obj:SetFont(path, size)
+    if not obj:SetFont(path, size) and not obj:GetFont() then
+        obj:SetFontObject(GameFontHighlight or GameFontNormal)
+    end
 end
 
 local ACCENT, HOVER, DOWN = { 0.13, 0.17, 0.23, 1 }, { 0.20, 0.30, 0.42, 1 }, { 0.10, 0.45, 0.80, 1 }
@@ -697,7 +699,9 @@ local function MeasureHeight(text)
         measureFS:SetPoint("TOPLEFT", outputChild, "TOPLEFT", 4, -2)
     end
     local font, size, flags = outputText:GetFont()
-    if font then measureFS:SetFont(font, size, flags) end
+    if not (font and measureFS:SetFont(font, size, flags)) and not measureFS:GetFont() then
+        measureFS:SetFontObject(GameFontHighlight or GameFontNormal)
+    end
     measureFS:SetSpacing(outputText.GetSpacing and outputText:GetSpacing() or 2)
     measureFS:SetWidth(histTextW)
     measureFS:SetText(text)
