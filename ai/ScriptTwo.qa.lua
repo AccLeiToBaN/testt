@@ -1,7 +1,7 @@
--- AccLua AI UI v9 (WoW 3.3.5 / Lua 5.1): compact, resizable window for the local model (KoboldCpp).
--- v4: model menu with descriptions, hardware fit (VRAM/RAM from the host) and tooltips.
+-- AccLua AI UI v29 (WoW 3.3.5 / Lua 5.1): compact, resizable window for the shared AI relay (no local model: inference runs on the server, nothing is downloaded to the PC).
+-- v4: model menu with descriptions and hardware fit (removed in v29: no local model any more).
 -- v5: no global frame names (hand-made scroll bars), separate TALK/ACTIONS chats, message queue,
---     Stop for a waiting request, history restore after /reload, bigger fonts, delete models from the menu.
+--     Stop for a waiting request, history restore after /reload, bigger fonts.
 -- v7: constructor ReloadUI/Apply/File + working.lua host IPC; AccLua Tesq* Apply env.
 -- v8: even header + Russian tooltips; chat width fix; working.lua open (quoted CreateProcess on host);
 --     Apply last/selected ```lua```; best-effort Unload of Apply-created frames.
@@ -62,7 +62,7 @@ if type(prev) == "table" then
         if type(prev.chat) == "table" then prev.chat.enabled = false end
         prev.waitingKind, prev.waitingSys = nil, nil
         prev.queue = {} -- the old ticker must not send its queued messages either
-        prev.dlPoll, prev.menuWanted = nil, nil -- the old ticker must not keep polling downloads
+-- ai-fix: no model/download polling anymore (the model lives on the relay).
         -- v16+: the old CHAT-mode listener and its game-chat send queue must go quiet too.
         if type(prev.chatEvFrame) == "table" and prev.chatEvFrame.UnregisterAllEvents then prev.chatEvFrame:UnregisterAllEvents() end
         prev.chatSendQ, prev.chatIn = {}, {}
@@ -279,7 +279,7 @@ local function MakeScroll(parent)
     return sf, bar
 end
 
--- Window: header (mode, model, context buttons, copy/clear/close), status, history, input, size grip.
+-- Window: header (mode, think, context buttons, copy/clear/close), status, history, input, size grip.
 local frame = CreateFrame("Frame", nil, UIParent)
 AccLuaAI.frame = frame
 frame:SetWidth(700)
@@ -369,7 +369,6 @@ do -- v20: segmented look: one dark groove behind the three tabs
     groove:SetPoint("BOTTOMRIGHT", chatBtn, "BOTTOMRIGHT", 2, -2)
     groove:SetTexture(0, 0, 0, 0.35)
 end
-local modelBtn = Button(frame, 80, T("Модель", "Model"))
 -- Thinking for code requests (slower, more accurate); toggled on the host with [AI:THINK=0|1].
 local thinkBtn = Button(frame, 64, ThinkLabel(true))
 -- v28: web search mode on the host ([AI:WEB=n]: 0 = only "?" questions, 1 = auto (default), 2 = always).
@@ -391,17 +390,16 @@ local unloadBtn = Button(frame, 48, T("Снять", "Unload"))
 local unloadBlockBtn = Button(frame, 72, T("Снять блок", "Unload blk"))
 local applyBtn = Button(frame, 64, T("Применить", "Apply"))
 local reloadBtn = Button(frame, 52, "Reload")
-for _, b in ipairs({ modeBtn, actBtn, chatBtn, modelBtn, thinkBtn, AccLuaAI.webBtn, runBtn, stopBtn, sayBtn,
+for _, b in ipairs({ modeBtn, actBtn, chatBtn, thinkBtn, AccLuaAI.webBtn, runBtn, stopBtn, sayBtn,
         closeBtn, clearBtn, copyBtn, fileBtn, unloadBtn, unloadBlockBtn, applyBtn, reloadBtn }) do
     RaiseHeaderBtn(b)
 end
 
--- Row1: title + mode/model/think + context + X. Row2: constructor tools. Title drag strip stays free.
+-- Row1: title + mode/think + context + X. Row2: constructor tools. Title drag strip stays free.
 local function LayoutHeader()
     FitBtn(modeBtn, 44)
     FitBtn(actBtn, 56)
     FitBtn(chatBtn, 44)
-    FitBtn(modelBtn, 64)
     FitBtn(thinkBtn, 56)
     FitBtn(AccLuaAI.webBtn, 56)
     FitBtn(runBtn, 36)
@@ -424,10 +422,8 @@ local function LayoutHeader()
     actBtn:SetPoint("LEFT", modeBtn, "RIGHT", 1, 0)
     chatBtn:ClearAllPoints()
     chatBtn:SetPoint("LEFT", actBtn, "RIGHT", 1, 0)
-    modelBtn:ClearAllPoints()
-    modelBtn:SetPoint("LEFT", chatBtn, "RIGHT", HDR_GAP + 4, 0)
     thinkBtn:ClearAllPoints()
-    thinkBtn:SetPoint("LEFT", modelBtn, "RIGHT", HDR_GAP, 0)
+    thinkBtn:SetPoint("LEFT", chatBtn, "RIGHT", HDR_GAP + 4, 0)
     AccLuaAI.webBtn:ClearAllPoints()
     AccLuaAI.webBtn:SetPoint("LEFT", thinkBtn, "RIGHT", HDR_GAP, 0)
     local leftAnchor = AccLuaAI.webBtn
@@ -537,8 +533,7 @@ end
 -- sent = questions for Up/Down recall (oldest first, 30 max), recall = position while browsing them.
 local function NewChat(intro) return { history = { intro }, plain = { "" }, top = 1, sent = {} } end
 AccLuaAI.chats = {
-    talk = NewChat("|cff66ccffAccLua AI|r " .. T("(локально, без облака). Первый ответ после запуска может идти 10-40 с. Вопрос с ? или словами найди/поищи - поиск в интернете; кнопка «Сеть» - когда искать (авто / всегда / только с ?). Кнопка с именем модели - выбор модели: там же видно, потянет ли её ваш ПК.",
-        "(local, no cloud). First answer after a start may take 10-40 s. Start with ? or say найди/поищи for a web search; the Web button sets when to search (auto / always / only with ?). The model button switches models and shows whether your PC can run each one.")),
+        talk = NewChat("|cff66ccffAccLua AI|r " .. T("нейросеть подключена (модель на сервере, скачивать нечего). Первый ответ может идти несколько секунд. Вопрос словами найди/поищи - поиск в интернете; кнопка «Сеть» - когда искать.", "AI connected (the model lives on the server, nothing to download). The first reply may take a few seconds. Start with ? or say find/search for a web search; the Web button sets when to search.")),
     actions = NewChat("|cff66ccffACTIONS:|r " .. T("опишите действие (прыгни, сядь, открой сумку, иди к NPC ...)",
         "describe an action (jump, sit, open bags, go to NPC ...)")),
     chat = NewChat("|cff66ccffCHAT:|r " .. T("ИИ сам отвечает в игровой чат (ЛС / Сказать). Включите «Отвечать в ЛС» или «Отвечать в /say» и добавьте ники в белый список. «Черновик» - если хотите отправлять Enter вручную. Поле ввода - вопрос к ИИ, в игру не уходит.",
@@ -1068,7 +1063,7 @@ frame:SetScript("OnSizeChanged", Resized)
 frame:SetScript("OnShow", function()
     Resized()
     LayoutHeader()
-    -- Start AccLuaAIHost + KoboldCpp only while this window is open.
+    -- Start AccLuaAIHost only while this window is open (inference runs on the relay server).
     AccLuaAI.engineWanted = true
     if not AccLuaAI._bootDone then
         AccLuaAI._bootDone = true
@@ -2445,7 +2440,7 @@ function SaveWorkingScript(code)
         return false
     end
     AccLuaAI.workingCache = code
-    -- Front of queue: Apply must not lose to MODELS/DLSTATUS polls.
+-- Front of queue: Apply goes before any other queued command.
     table.insert(sysQueue, 1, "[AI:SCRIPT_SAVE=" .. hex .. "]")
     SysStatus(T("Сохраняю working.lua...", "Saving working.lua..."))
     return true
@@ -2682,254 +2677,6 @@ end)
 -- Click a tinted ```lua``` region to select it for Apply (see SyncCodeHits). RMB on Apply still cycles.
 output:EnableMouse(true)
 
--- Model menu: filled from [MODELS]; installed -> switch, missing -> download (progress in the status line).
-end
--- Each row: name, size, one-line description, hardware verdict; hover = full tooltip.
-local menu, GB, MODEL_INFO, FIT, FitText, DisarmDelete, ShowModels, Clock, dlErrors, delErrors, ModelName
-do -- v17: scope block (Lua 5.1 200-local limit)
-menu = CreateFrame("Frame", nil, frame)
-AccLuaAI.menu = menu
-menu:SetPoint("TOPLEFT", modelBtn, "BOTTOMLEFT", 0, -2)
-menu:SetWidth(460)
-menu:SetFrameStrata("FULLSCREEN_DIALOG")
-menu:SetFrameLevel((frame:GetFrameLevel() or 50) + 20)
-Backdrop(menu, 0.10, 0.11, 0.13, 0.98)
-menu:Hide()
-menu.rows = {}
-menu.head = menu:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-menu.head:SetPoint("TOPLEFT", menu, "TOPLEFT", 8, -7)
-menu.head:SetWidth(444)
-menu.head:SetJustifyH("LEFT")
-menu.head:SetTextColor(0.65, 0.72, 0.84)
-Font(menu.head, 11)
-menu.hw = menu:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-menu.hw:SetPoint("TOPLEFT", menu.head, "BOTTOMLEFT", 0, -3)
-menu.hw:SetWidth(444)
-menu.hw:SetJustifyH("LEFT")
-menu.hw:SetTextColor(0.65, 0.72, 0.84)
-Font(menu.hw, 11)
-local ROW_H, ROW_STEP = 36, 39
-function GB(bytes) return string.format("%.1f %s", (tonumber(bytes) or 0) / 1073741824, T("ГБ", "GB")) end
-local function MiB2GB(mib) return string.format("%.0f %s", (tonumber(mib) or 0) / 1024, T("ГБ", "GB")) end
-
--- What each model is good for (ids come from the host; unknown ids get a generic line).
-MODEL_INFO = {
-    -- ai-light (26.09): light models only
-    ["qwen35-4b"] = {
-        star = true,
-        short = T("рекомендуем: лёгкая (2.7 ГБ), быстрая, русский и код", "recommended: light (2.7 GB), fast, Russian + code"),
-        long = T("Qwen3.5-4B (Alibaba, 2026). Вдвое легче и примерно вдвое быстрее 9B: работа с инструментами и поиском на том же уровне, код и знания немного слабее. 201 язык. Хватает 4 ГБ видеопамяти.",
-            "Qwen3.5-4B (Alibaba, 2026). Half the size and about twice as fast as the 9B: tool use and search on par, code and knowledge a bit weaker. 201 languages. 4 GB of VRAM is enough."),
-    },
-    ["qwen35-2b"] = {
-        short = T("самая лёгкая (1.3 ГБ), слабее в коде и русском", "lightest (1.3 GB), weaker code + Russian"),
-        long = T("Qwen3.5-2B (Alibaba, 2026). Для слабых ПК: 1.3 ГБ, работает и на процессоре. Код и русский заметно слабее 4B, иногда зацикливается в режиме размышления.",
-            "Qwen3.5-2B (Alibaba, 2026). For weak PCs: 1.3 GB, runs on the CPU too. Code and Russian clearly weaker than the 4B; sometimes loops in thinking mode."),
-    },
-    ["qwen35-9b"] = {
-        star = true,
-        short = T("рекомендуем: лучший код и русский, думает перед ответом", "recommended: best code + Russian, thinks before answering"),
-        long = T("Qwen3.5-9B (Alibaba, 2026). Лучшая модель для 8 ГБ видеопамяти: код (LiveCodeBench 65), 201 язык, режим размышления для кода и макросов. Целиком помещается в 8 ГБ. Ответ 2-6 с, код 15-40 с.",
-            "Qwen3.5-9B (Alibaba, 2026). Best 8 GB-VRAM model: code (LiveCodeBench 65), 201 languages, thinking mode for code and macros. Fits fully in 8 GB. Reply 2-6 s, code 15-40 s."),
-    },
-    ["gemma4-12b"] = {
-        short = T("умнее в рассуждениях, но тяжелее: 6.3 ГБ", "stronger reasoning, but heavier: 6.3 GB"),
-        long = T("Gemma 4 12B (Google, 2026, QAT). Сильнее в рассуждениях и коде (LiveCodeBench 72), 140+ языков. 6.3 ГБ не помещаются целиком в 8 ГБ видеопамяти вместе с WoW: часть считает процессор, ответы в 2-4 раза медленнее. Для видеокарт 12+ ГБ - лучший выбор.",
-            "Gemma 4 12B (Google, 2026, QAT). Stronger reasoning and code (LiveCodeBench 72), 140+ languages. 6.3 GB does not fully fit in 8 GB VRAM next to WoW: part runs on the CPU, replies 2-4x slower. Best choice for 12+ GB cards."),
-    },
-    ["qwen3-8b"] = {
-        short = T("прошлое поколение (2025): быстрая, код и русский слабее", "previous generation (2025): fast, weaker code + Russian"),
-        long = T("Qwen3-8B (Alibaba, 2025). Быстрая и надёжная, но код и русский заметно слабее Qwen3.5. Оставлена, если уже скачана.",
-            "Qwen3-8B (Alibaba, 2025). Fast and reliable, but code and Russian are noticeably weaker than Qwen3.5. Kept if already downloaded."),
-    },
-}
-FIT = {
-    [1] = { T("потянет", "runs fine"), "|cff33dd66" },
-    [2] = { T("потянет, но медленнее", "runs, but slower"), "|cffffcc00" },
-    [3] = { T("не потянет: мало памяти", "will not run: not enough memory"), "|cffff5555" },
-}
-function FitText(fit)
-    local f = FIT[fit]
-    if not f then return "" end
-    return f[2] .. f[1] .. "|r"
-end
-
--- Delete: a red button on every installed row (the current model too: the host unloads it first).
--- The first click arms it for 3 s ("Точно?"), the second one sends [AI:DELETE=id].
-local DEL_BG, DEL_HOVER, DEL_DOWN = { 0.62, 0.12, 0.12, 1 }, { 0.85, 0.20, 0.20, 1 }, { 0.45, 0.08, 0.08, 1 }
-local DEL_LABEL, DEL_ARMED = T("Удалить", "Delete"), T("Точно? ещё раз", "Sure? again")
-local DEL_W, DEL_ARMED_W = 64, 96
-function DisarmDelete()
-    local arm = AccLuaAI.delArm
-    AccLuaAI.delArm = nil
-    if arm and arm.btn then
-        arm.btn.text:SetText(DEL_LABEL)
-        arm.btn:SetWidth(DEL_W)
-    end
-end
-local function DeleteTip(btn, m, current)
-    if type(GameTooltip) ~= "table" then return end
-    local arm = AccLuaAI.delArm
-    GameTooltip:Hide()
-    GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
-    if arm and arm.id == m.id then
-        GameTooltip:AddLine(T("Точно? нажмите ещё раз", "Sure? click again"), 1, 0.3, 0.3)
-    end
-    GameTooltip:AddLine(T("Удалить файл модели", "Delete the model file"), 1, 0.45, 0.45)
-    GameTooltip:AddLine(m.name .. "  (" .. GB(m.size) .. T(" освободится на диске)", " freed on disk)"), 1, 1, 1)
-    if m.id == current then
-        GameTooltip:AddLine(T("Это текущая модель: ИИ остановит её перед удалением, потом выберите другую.",
-            "This is the current model: the AI stops it before deleting; pick another one afterwards."), 1, 0.82, 0, true)
-    end
-    GameTooltip:AddLine(T("Второй щелчок в течение 3 с подтверждает удаление.", "A second click within 3 s confirms."), 0.6, 0.6, 0.6, true)
-    GameTooltip:Show()
-end
-
-function ShowModels(list, current, hw)
-    DisarmDelete()
-    menu.head:SetText(T("Все модели: чат RU/EN, код и макросы 3.3.5, поиск в интернете", "All models: RU/EN chat, 3.3.5 code and macros, web search"))
-    if hw and (hw.vram or 0) > 0 then
-        local line = T("Ваш ПК: ", "Your PC: ") .. (hw.gpu ~= "" and hw.gpu or T("видеокарта", "GPU")) .. ", " ..
-            MiB2GB(hw.vram) .. T(" видео, ", " VRAM, ") .. MiB2GB(hw.ram) .. T(" ОЗУ", " RAM")
-        if hw.layers and hw.layers ~= "" then
-            line = line .. T("; сейчас на видеокарте слоёв: ", "; layers on GPU now: ") .. hw.layers
-        end
-        menu.hw:SetText(line)
-    elseif hw and (hw.ram or 0) > 0 then
-        menu.hw:SetText(T("Ваш ПК: видеокарта не найдена, ", "Your PC: no GPU found, ") .. MiB2GB(hw.ram) .. T(" ОЗУ - ответы будут медленными", " RAM - replies will be slow"))
-    else
-        menu.hw:SetText("")
-    end
-    -- Rows start below the header lines (the hardware line can wrap with the bigger font).
-    local top = 7 + (menu.head:GetStringHeight() or 12) + 3 + (menu.hw:GetStringHeight() or 12) + 6
-    for i, m in ipairs(list) do
-        local row = menu.rows[i]
-        if not row then
-            row = Button(menu, 444, "")
-            row:SetHeight(ROW_H)
-            row.text:ClearAllPoints()
-            row.text:SetPoint("TOPLEFT", row, "TOPLEFT", 6, -4)
-            row.text:SetJustifyH("LEFT")
-            Font(row.text, 12)
-            row.sub = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            row.sub:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 6, 4)
-            row.sub:SetWidth(430)
-            row.sub:SetHeight(13)
-            row.sub:SetJustifyH("LEFT")
-            row.sub:SetTextColor(0.80, 0.86, 0.95)
-            Font(row.sub, 11)
-            -- Delete the model file (every installed model): red button at the right of the row.
-            row.del = Button(row, DEL_W, DEL_LABEL)
-            row.del:SetHeight(20)
-            row.del:SetPoint("RIGHT", row, "RIGHT", -6, 0)
-            row.del.bg:SetTexture(unpack(DEL_BG))
-            row.del:SetScript("OnMouseDown", function(self) self.bg:SetTexture(unpack(DEL_DOWN)) end)
-            row.del:SetScript("OnMouseUp", function(self) self.bg:SetTexture(unpack(DEL_HOVER)) end)
-            menu.rows[i] = row
-        end
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", menu, "TOPLEFT", 8, -top - (i - 1) * ROW_STEP)
-        local info = MODEL_INFO[m.id] or {
-            short = T("локальная модель", "local model"),
-            long = T("Модель из списка хоста.", "A model from the host list."),
-        }
-        local tag
-        if m.id == current then tag = "|cff66ccff" .. T("текущая", "current") .. "|r"
-        elseif m.state == 1 then tag = T("выбрать", "select")
-        elseif m.state == 2 then
-            -- v23: live progress inside the row (the status line is hidden under the open menu)
-            tag = "|cffffd200" .. (AccLuaAI.dlId == m.id and AccLuaAI.dlLine or T("скачивается...", "downloading...")) .. "|r"
-        else tag = T("скачать", "download") end
-        row.text:SetText((info.star and "|cffffd200*|r " or "") .. m.name .. "  " .. GB(m.size) .. "  - " .. tag)
-        local fit = FitText(m.fit)
-        row.sub:SetText(info.short .. (fit ~= "" and ("  -  " .. fit) or ""))
-        row:SetScript("OnClick", function()
-            menu:Hide()
-            if type(GameTooltip) == "table" then GameTooltip:Hide() end
-            if m.id == current then return end
-            if m.state == 1 then
-                Sys("[AI:MODEL=" .. m.id .. "]")
-                SysStatus(T("Переключаю на ", "Switching to ") .. m.name .. "...")
-            else
-                Sys("[AI:DOWNLOAD=" .. m.id .. "]")
-                SysStatus(T("Запускаю скачивание ", "Starting download of ") .. m.name .. " (" .. GB(m.size) .. ")...")
-            end
-        end)
-        row:SetScript("OnEnter", function(self)
-            self.bg:SetTexture(unpack(HOVER))
-            if type(GameTooltip) ~= "table" then return end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:AddLine(m.name .. "  (" .. GB(m.size) .. ")", 0.4, 0.8, 1)
-            GameTooltip:AddLine(info.long, 1, 1, 1, true)
-            if m.fit and FIT[m.fit] then
-                local need = (tonumber(m.size) or 0) / 1073741824 + 2
-                local why
-                if m.fit == 1 then
-                    why = T("целиком на видеокарте: полная скорость", "fully on the GPU: full speed")
-                elseif m.fit == 2 then
-                    why = T("часть модели на процессоре: работает, но в 2-5 раз медленнее", "part of the model on the CPU: works, but 2-5x slower")
-                else
-                    why = T("не хватает ни видеопамяти, ни ОЗУ", "neither VRAM nor RAM is enough")
-                end
-                GameTooltip:AddLine(" ")
-                GameTooltip:AddLine(FitText(m.fit) .. " - " .. why, 1, 1, 1, true)
-                if hw and (hw.vram or 0) > 0 then
-                    GameTooltip:AddLine(string.format(T("Нужно ~%.1f ГБ видеопамяти (модель + WoW + кэш), у вас %.1f ГБ", "Needs ~%.1f GB VRAM (model + WoW + cache), you have %.1f GB"),
-                        need, (tonumber(hw.vram) or 0) / 1024), 0.8, 0.8, 0.8, true)
-                end
-            end
-            GameTooltip:AddLine(T("Поиск в интернете и память диалога одинаковы у всех моделей.", "Web search and conversation memory are the same for every model."), 0.6, 0.6, 0.6, true)
-            GameTooltip:Show()
-        end)
-        row:SetScript("OnLeave", function(self)
-            self.bg:SetTexture(unpack(ACCENT))
-            if type(GameTooltip) == "table" then GameTooltip:Hide() end
-        end)
-        if m.state == 1 then
-            row.del:SetScript("OnClick", function(self)
-                local arm = AccLuaAI.delArm
-                if not (arm and arm.id == m.id and GetTime() <= arm.untilT) then
-                    DisarmDelete()
-                    AccLuaAI.delArm = { id = m.id, untilT = GetTime() + 3, btn = self }
-                    self:SetWidth(DEL_ARMED_W) -- grows to the left over the end of the description line
-                    self.text:SetText(DEL_ARMED)
-                    SysStatus(T("Точно? нажмите ещё раз: удалить ", "Sure? click again to delete ") .. m.name .. " (" .. GB(m.size) .. ")")
-                    DeleteTip(self, m, current)
-                    return
-                end
-                DisarmDelete()
-                menu:Hide()
-                if type(GameTooltip) == "table" then GameTooltip:Hide() end
-                Sys("[AI:DELETE=" .. m.id .. "]")
-                SysStatus(T("Удаляю ", "Deleting ") .. m.name .. "...")
-            end)
-            row.del:SetScript("OnEnter", function(self)
-                self.bg:SetTexture(unpack(DEL_HOVER))
-                DeleteTip(self, m, current)
-            end)
-            row.del:SetScript("OnLeave", function(self)
-                self.bg:SetTexture(unpack(DEL_BG))
-                if type(GameTooltip) == "table" then GameTooltip:Hide() end
-            end)
-            row.del.text:SetText(DEL_LABEL)
-            row.del:SetWidth(DEL_W)
-            row.del:Show()
-            row.sub:SetWidth(362)
-        else
-            row.del:Hide()
-            row.sub:SetWidth(430)
-        end
-        row:Show()
-    end
-    for i = #list + 1, #menu.rows do menu.rows[i]:Hide() end
-    menu:SetHeight(top + #list * ROW_STEP + 4)
-    menu:Show()
-end
-modelBtn:SetScript("OnClick", function()
-    if menu:IsShown() then menu:Hide() return end
-    AccLuaAI.menuWanted = true
-    Sys("[AI:MODELS]")
-end)
 thinkBtn:SetScript("OnClick", function()
     Sys("[AI:THINK=" .. (AccLuaAI.think == false and "1" or "0") .. "]")
 end)
@@ -2956,9 +2703,6 @@ Tip(modeBtn, "TALK", T("Вопросы, код, макросы, поиск в и
 Tip(actBtn, "ACTIONS", T("Действия персонажа: прыгни, сядь, открой сумку, иди к NPC.", "Character actions: jump, sit, open bags, go to NPC."))
 Tip(chatBtn, "CHAT", T("ИИ общается в игровом чате: отвечает на ЛС и /say на любые темы. Всё выключено по умолчанию - включите переключатели под шапкой.",
     "The AI talks in the game chat: replies to whispers and /say on any topic. All off by default - enable the toggles under the header."))
-Tip(modelBtn, T("Модель", "Model"),
-    T("Выбор локальной модели KoboldCpp. В меню видно, потянет ли её ваш ПК (VRAM/RAM).",
-        "Pick a local KoboldCpp model. The menu shows whether your PC can run it (VRAM/RAM)."))
 Tip(thinkBtn, T("Размышление перед кодом", "Thinking before code"),
     T("Вкл: код и макросы точнее, но ответ 20–90 с. Выкл: ответ 5–15 с. Стоп рядом с Send прерывает долгий ответ.",
         "On: more accurate code/macros, 20–90 s. Off: 5–15 s. Stop next to Send cancels a long reply."))
@@ -3004,23 +2748,6 @@ function Clock(sec)
     if sec <= 0 then return "--" end
     if sec >= 3600 then return string.format("%d:%02d:%02d", sec / 3600, (sec % 3600) / 60, sec % 60) end
     return string.format("%d:%02d", sec / 60, sec % 60)
-end
-dlErrors = {
-    ["1"] = T("мало места на диске", "not enough disk space"),
-    ["2"] = T("нет сети - повторите, докачка продолжится", "network error - retry, it resumes"),
-    ["3"] = T("файл повреждён - повторите", "checksum mismatch - retry"),
-    ["4"] = T("нет прав на запись в AiRuntime", "cannot write to AiRuntime"),
-}
-delErrors = {
-    current = T("это текущая модель", "it is the current model"),
-    downloading = T("модель сейчас скачивается", "it is being downloaded"),
-    busy = T("ИИ занят, повторите позже", "the AI is busy, retry later"),
-    unknown = T("неизвестная модель", "unknown model"),
-    error = T("файл не удалось удалить", "the file could not be deleted"),
-}
-function ModelName(id)
-    for _, m in ipairs(AccLuaAI.models or {}) do if m.id == id then return m.name end end
-    return tostring(id)
 end
 
 -- /reload: the host keeps both dialogues. [Q]q[/Q][A]a[/A] = TALK, [AQ]q[/AQ][AA]a[/AA] = ACTIONS,
@@ -3153,134 +2880,7 @@ function HandleSys(text, raw, kind, cmd)
         RestoreHistory(hist)
         return
     end
-    local del = text:match("%[DELETE%](.-)%[/DELETE%]")
-    if del then
-        local state, id, reason = del:match("^(%a+),([%w%-%.]+),?(.*)$")
-        local shown = ModelName(id)
-        reason = Trim(reason)
-        if state == "ok" then
-            SysStatus(T("Удалено: ", "Deleted: ") .. shown)
-            AccLuaAI.menuWanted = true -- reopen the menu with the new list
-            Sys("[AI:MODELS]")
-        elseif reason == "busy" and id and AfterChat("[AI:DELETE=" .. id .. "]") then
-            SysStatus(T("Удалю после ответа: ", "Deleting after the reply: ") .. shown)
-        else
-            SysStatus(T("Не удалось удалить ", "Could not delete ") .. shown .. ": " ..
-                (delErrors[reason] or (reason ~= "" and reason or T("ошибка", "error"))))
-        end
-        return
-    end
-    local models = text:match("%[MODELS%](.-)%[/MODELS%]")
-    if models then
-        -- "cur:none" (or an empty cur:): no model is installed/selected; the menu still lists downloads.
-        local current = models:match("^cur:([%w%-%.]+)")
-        if current == "none" then current = nil end
-        -- ";hw:vram:<MiB>,ram:<MiB>,layers:<n/m>,gpu:<name>" (v4 host); absent on older hosts.
-        local hw = { vram = tonumber(models:match(";hw:vram:(%d+)")) or 0, ram = tonumber(models:match(",ram:(%d+)")) or 0,
-            layers = models:match(",layers:([%d/]*)") or "", gpu = models:match(",gpu:([^;]*)") or "" }
-        local list, found = {}, false
-        for id, name, size, state, fit in models:gmatch(";([%w%-]+),([^,;]+),(%d+),(%d),?(%d?)") do
-            list[#list + 1] = { id = id, name = name, size = tonumber(size), state = tonumber(state), fit = tonumber(fit) }
-            if id == current then found = true AccLuaAI.modelName = name modelBtn.text:SetText(name) end
-            if tonumber(state) == 2 then AccLuaAI.dlPoll = GetTime() + 1 end
-        end
-        if not current then
-            -- No model (never installed, or the current one was deleted): the button says so.
-            AccLuaAI.modelName = nil
-            modelBtn.text:SetText(T("нет модели", "no model"))
-        elseif not found and list[1] then
-            -- A current id the list does not know: the button stops naming the old model.
-            AccLuaAI.modelName = nil
-            modelBtn.text:SetText(T("Модель", "Model"))
-        end
-        AccLuaAI.models, AccLuaAI.hw = list, hw
-        if AccLuaAI.menuWanted then
-            AccLuaAI.menuWanted = nil
-            ShowModels(list, current, hw)
-        elseif not AccLuaAI.hintShown then
-            -- One-time hint: the recommended model is not installed yet.
-            AccLuaAI.hintShown = true
-            local hinted = false
-            for _, m in ipairs(list) do
-                if MODEL_INFO[m.id] and MODEL_INFO[m.id].star and m.state == 0 and m.id ~= current then
-                    hinted = true
-                    status:SetText(T("Рекомендуем ", "Recommended: ") .. m.name .. " (" .. GB(m.size) .. ") - " ..
-                        T("кнопка модели, там же скачивание", "model button, download there") ..
-                        (m.fit and FIT[m.fit] and (" - " .. FitText(m.fit)) or ""))
-                end
-            end
-            if not hinted and not current then
-                status:SetText(T("Модель не выбрана: нажмите \"нет модели\" - выбор и скачивание",
-                    "No model selected: press \"no model\" to pick or download one"))
-            end
-        end
-        return
-    end
-    local model = text:match("%[MODEL%](.-)%[/MODEL%]")
-    if model then
-        local state, id, name = model:match("^(%a+),([%w%-]+),?([^,]*)")
-        if state == "ok" then
-            AccLuaAI.modelName = name
-            modelBtn.text:SetText(name)
-            AddHistory(AccLuaAI.mode, "|cff66ccff" .. T("Модель: ", "Model: ") .. name .. "|r " ..
-                T("(загружается 10-30 с, контекст сброшен)", "(loading 10-30 s, context reset)"), "")
-            SysStatus(T("Модель переключена: ", "Model switched: ") .. name)
-        elseif state == "missing" then
-            Sys("[AI:DOWNLOAD=" .. tostring(id) .. "]")
-        elseif state == "busy" and id and AfterChat("[AI:MODEL=" .. id .. "]") then
-            -- v26/v27: stop the running answer, then switch (AfterChat queues MODEL after cancel).
-            -- Must use AccLuaAI.CancelRequest — local CancelRequest is not visible in this do-block.
-            if IsChatKind(AccLuaAI.waitingKind) then
-                if type(AccLuaAI.CancelRequest) == "function" then
-                    AccLuaAI.CancelRequest()
-                end
-                SysStatus(T("Останавливаю ответ и переключаю модель: ", "Stopping the reply, then switching to: ") .. ModelName(id))
-            else
-                SysStatus(T("Переключу модель после ответа: ", "Switching the model after the reply: ") .. ModelName(id))
-            end
-        else
-            SysStatus(T("Не удалось переключить модель", "Could not switch the model"))
-        end
-        return
-    end
     -- run,<id>,<allDone>,<allTotal>,<speed>,<eta>,<err>,<stage>: done/total are absolute bytes of the whole file.
-    local dl = text:match("%[DL%](.-)%[/DL%]")
-    if dl then
-        local f = {}
-        for v in dl:gmatch("[^,]+") do f[#f + 1] = v end
-        local state, id = f[1], f[2]
-        local shown = id
-        for _, m in ipairs(AccLuaAI.models or {}) do if m.id == id then shown = m.name end end
-        if state == "started" or state == "busy" or state == "run" then
-            AccLuaAI.dlId = id
-            AccLuaAI.dlPoll = GetTime() + 1.5
-            local done, total, speed, eta = tonumber(f[3] or 0) or 0, tonumber(f[4] or 0) or 0, tonumber(f[5] or 0) or 0, f[6]
-            if state == "run" and total > 0 then
-                AccLuaAI.dlLine = string.format("%d%%  %.1f %s  %s %s", math.floor(done * 100 / total),
-                    speed / 1048576, T("МБ/с", "MB/s"), T("осталось", "left"), Clock(eta))
-                SysStatus(string.format("%s %s: %s / %s (%s)", T("Скачивание", "Downloading"), shown,
-                    GB(done), GB(total), AccLuaAI.dlLine))
-            else
-                AccLuaAI.dlLine = T("скачивается...", "downloading...")
-                SysStatus(T("Скачивание ", "Downloading ") .. tostring(shown) .. "...")
-            end
-            -- keep the open menu row current (cheap: ~3 rows)
-            if menu:IsShown() and AccLuaAI.models and type(AccLuaAI.hw) == "table" then
-                local cur
-                for _, m in ipairs(AccLuaAI.models) do if m.name == AccLuaAI.modelName then cur = m.id end end
-                ShowModels(AccLuaAI.models, cur, AccLuaAI.hw)
-            end
-        elseif state == "done" or state == "installed" then
-            AccLuaAI.dlPoll = nil
-            SysStatus(T("Скачано: ", "Downloaded: ") .. tostring(shown))
-            Sys("[AI:MODEL=" .. tostring(id) .. "]")
-        elseif state == "fail" then
-            AccLuaAI.dlPoll = nil
-            SysStatus(T("Ошибка скачивания: ", "Download failed: ") .. (dlErrors[f[7] or ""] or ("err " .. tostring(f[7]))))
-        else
-            AccLuaAI.dlPoll = nil
-        end
-    end
 end
 
 -- ===== CHAT mode: the AI answers whispers / says in the game chat =====
@@ -3651,13 +3251,12 @@ ticker:SetScript("OnUpdate", function(_, elapsed)
     end
     if bootAt and now > bootAt then
         bootAt = nil
-        -- First open of the AI window: cancel stale work, wake KoboldCpp, then UI state.
+        -- First open of the AI window: cancel stale work, wake the AI host, then UI state.
         table.insert(sysQueue, 1, "[AI:CANCEL]")
         table.insert(sysQueue, 2, "[AI:WAKE]")
-        table.insert(sysQueue, 3, "[AI:MODELS]")
-        table.insert(sysQueue, 4, "[AI:HISTORY]")
-        table.insert(sysQueue, 5, "[AI:THINK]")
-        table.insert(sysQueue, 6, "[AI:WEB]")
+        table.insert(sysQueue, 3, "[AI:HISTORY]")
+        table.insert(sysQueue, 4, "[AI:THINK]")
+        table.insert(sysQueue, 5, "[AI:WEB]")
     end
     -- Timeouts first: an expired talk/actions request must get its "timeout" line before anything is sent.
     local kind = AccLuaAI.waitingKind
@@ -3671,17 +3270,12 @@ ticker:SetScript("OnUpdate", function(_, elapsed)
     if AccLuaAI.waitingSys and now >= (AccLuaAI.waitingSysUntil or 0) then
         AccLuaAI.waitingSys, AccLuaAI.waitingSysUntil = nil, nil -- no answer to a silent command: move on
     end
-    if AccLuaAI.delArm and now > AccLuaAI.delArm.untilT then DisarmDelete() end
     if AccLuaAI.afterChat and not AccLuaAI.waitingKind and now >= (AccLuaAI.afterChatAt or 0) then
         local cmds = {}
         for cmd in pairs(AccLuaAI.afterChat) do cmds[#cmds + 1] = cmd end
         table.sort(cmds)
         AccLuaAI.afterChat = nil
         for _, cmd in ipairs(cmds) do Sys(cmd) end
-    end
-    if AccLuaAI.dlPoll and now > AccLuaAI.dlPoll and #sysQueue == 0 then
-        AccLuaAI.dlPoll = now + 1.5
-        Sys("[AI:DLSTATUS]")
     end
     if sysQueue[1] and SendTracked("sys", sysQueue[1]) then table.remove(sysQueue, 1) end
     PumpQueue()
@@ -3734,7 +3328,7 @@ function _G.AccLuaAI_Receive(text)
     if qaError and sysCmd and kind and now - (AccLuaAI.waitingSince or now) > 1
             and visibleText:find("AI is busy", 1, true) then
         ReleaseSys()
-        table.insert(sysQueue, 1, sysCmd)
+        table.insert(sysQueue, 6, sysCmd)
         AccLuaAI.sysSerial = true
         return
     end
